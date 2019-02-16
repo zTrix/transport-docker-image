@@ -16,15 +16,6 @@ import paramiko
 
 logger = logging.getLogger('TransDockerImage')
 
-'''
-docker history bmitch3020/terraform-ansible -q | while read image_id; do
-    echo "$image_id"; \
-    if [ "$image_id" != "<missing>" ]; then \
-        docker inspect "$image_id" --format '{{json .RootFS.Layers}}' | jq .; \
-    fi; \
-done
-'''
-
 clean_template = """
 #!/usr/bin/env python
 
