@@ -219,9 +219,9 @@ def main(args):
     reader.close()
     writer.close()
 
-    exec_command('%s load -i %s' % (
-        args.target_docker_path,
+    exec_command('cat %s | %s load' % (
         shlex.quote(shrinked_path),
+        args.target_docker_path,
     ), ssh_client=target_ssh_client, print_stdout=True, print_stderr=True)
 
 if __name__ == '__main__':
