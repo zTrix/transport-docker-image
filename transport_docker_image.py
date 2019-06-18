@@ -114,11 +114,18 @@ def exec_command(command:str, ssh_client:paramiko.SSHClient=None, print_stdout=F
     if ssh_client is not None:
         stdin_io, stdout_io, stderr_io = ssh_client.exec_command(command)
         stdout = stdout_io.read()
+        stderr = stderr_io.read()
         if print_stdout:
-            print(stdout, file=sys.stderr)
+            try:
+                print(stdout.decode(), file=sys.stderr)
+            except:
+                print(stdout, file=sys.stderr)
         if print_stderr:
-            print(stderr_io.read(), file=sys.stderr)
-        return stdout
+            try:
+                print(stderr.decode(), file=sys.stderr)
+            except:
+                print(stderr, file=sys.stderr)
+        return stdout, stderr
     else:
         cmd = shlex.split(command)
         kwargs = {
@@ -128,10 +135,16 @@ def exec_command(command:str, ssh_client:paramiko.SSHClient=None, print_stdout=F
             kwargs['stderr'] = subprocess.PIPE
         proc = subprocess.run(cmd, **kwargs)
         if print_stdout:
-            print(proc.stdout, file=sys.stderr)
+            try:
+                print(proc.stdout.decode(), file=sys.stderr)
+            except:
+                print(proc.stdout, file=sys.stderr)
         if print_stderr:
-            print(proc.stderr, file=sys.stderr)
-        return proc.stdout
+            try:
+                print(proc.stderr.decode(), file=sys.stderr)
+            except:
+                print(proc.stderr, file=sys.stderr)
+        return proc.stdout, proc.stderr
 
 def main(args):
     if args.workdir:
@@ -146,7 +159,8 @@ def main(args):
         raise Exception('at least one end should be using ssh')
 
     exec_command('mkdir -p %s' % shlex.quote(os.path.join(tmp_dir, source_image_name)), ssh_client=source_ssh_client)
-    exec_command('docker save -o %s %s' % (
+    exec_command('%s save -o %s %s' % (
+        args.source_docker_path,
         shlex.quote(os.path.join(tmp_dir, source_image_name + '.tar')),
         shlex.quote(source_image_name),
     ), ssh_client=source_ssh_client)
@@ -155,21 +169,24 @@ def main(args):
         shlex.quote(os.path.join(tmp_dir, source_image_name)),
     ), ssh_client=source_ssh_client)
 
-    output = exec_command('docker inspect %s --format "{{json .RootFS.Layers}}"' % shlex.quote(target_image_name), ssh_client=target_ssh_client)
+    stdout, stderr = exec_command('%s inspect %s --format "{{json .RootFS.Layers}}"' % (args.target_docker_path, shlex.quote(target_image_name)), ssh_client=target_ssh_client, print_stderr=True)
 
-    existing_layers = json.loads(output)
-    assert isinstance(existing_layers, list)
+    if not stdout.strip() and b'Error: No such object:' in stderr:
+        logger.info('target image not found at destination, could not shrink size')
+    else:
+        existing_layers = json.loads(stdout)
+        assert isinstance(existing_layers, list)
 
-    clean_file = string.Template(clean_template).substitute(existing_layers=json.dumps(existing_layers), image_name=target_image_name)
-    write_file(os.path.join(tmp_dir, source_image_name, 'clean.py'), clean_file.encode(), ssh_client=source_ssh_client)
+        clean_file = string.Template(clean_template).substitute(existing_layers=json.dumps(existing_layers), image_name=target_image_name)
+        write_file(os.path.join(tmp_dir, source_image_name, 'clean.py'), clean_file.encode(), ssh_client=source_ssh_client)
 
-    exec_command('python %s' % (
-        shlex.quote(os.path.join(tmp_dir, source_image_name, 'clean.py'))
-    ), ssh_client=source_ssh_client, print_stderr=True)
+        exec_command('python %s' % (
+            shlex.quote(os.path.join(tmp_dir, source_image_name, 'clean.py'))
+        ), ssh_client=source_ssh_client, print_stderr=True)
 
-    exec_command('rm -f %s' % (
-        shlex.quote(os.path.join(tmp_dir, source_image_name, 'clean.py'))
-    ), ssh_client=source_ssh_client, print_stderr=True)
+        exec_command('rm -f %s' % (
+            shlex.quote(os.path.join(tmp_dir, source_image_name, 'clean.py'))
+        ), ssh_client=source_ssh_client, print_stderr=True)
 
     shrinked_path = os.path.join(tmp_dir, source_image_name + '.shrinked.tar.gz')
 
@@ -185,18 +202,25 @@ def main(args):
     writer = open_file(shrinked_path, mode='wb', ssh_client=target_ssh_client)
 
     transfered = 0
+    print('transfer started...', file=sys.stderr)
     while True:
         content = reader.read(64 * 1024)
         if not content:
             break
         writer.write(content)
         transfered += len(content)
-        print('transfered %d/%d' % (transfered, size), file=sys.stderr)
+        print('\rtransfered %d/%d, percent = %.2f%%' % (transfered, size, transfered*100.0/size), end='', file=sys.stderr)
+
+    if transfered == size:
+        print('transfer complete, transfered = %d, size = %d' % (transfered, size), file=sys.stderr)
+    else:
+        print('[ WARN ] transfer size mismatch, transfered = %d, size = %d' % (transfered, size), file=sys.stderr)
 
     reader.close()
     writer.close()
 
-    exec_command('docker load -i %s' % (
+    exec_command('%s load -i %s' % (
+        args.target_docker_path,
         shlex.quote(shrinked_path),
     ), ssh_client=target_ssh_client, print_stdout=True, print_stderr=True)
 
@@ -206,6 +230,8 @@ if __name__ == '__main__':
     parser.add_argument('target_image', help='Target image in format: [user@host[:port]/]image:tag')
     parser.add_argument('--workdir', help='Specify workdir for tempfile, defaults to random dir under /tmp', required=False)
     parser.add_argument('--loglevel', help='Specify log level', required=False, default=logging.INFO)
+    parser.add_argument('--target-docker-path', help='Specify target docker binary path', required=False, default='docker')
+    parser.add_argument('--source-docker-path', help='Specify source docker binary path', required=False, default='docker')
 
     args = parser.parse_args()
 
