@@ -195,7 +195,7 @@ def main(args):
         shlex.quote(os.path.join(tmp_dir, source_image_name))
     ), ssh_client=source_ssh_client, print_stderr=True)
 
-    exec_command('mkdir -p %s' % shlex.quote(os.path.join(tmp_dir, source_image_name)), ssh_client=target_ssh_client)
+    exec_command('mkdir -p %s' % shlex.quote(tmp_dir), ssh_client=target_ssh_client)
 
     size = file_size(shrinked_path, ssh_client=source_ssh_client)
     reader = open_file(shrinked_path, mode='rb', ssh_client=source_ssh_client)
@@ -224,6 +224,29 @@ def main(args):
         args.target_docker_path,
     ), ssh_client=target_ssh_client, print_stdout=True, print_stderr=True)
 
+    if not args.no_cleanup:
+        exec_command('rm -f %s %s && rm -rf %s && rmdir %s' % (
+            shlex.quote(shrinked_path),
+            shlex.quote(os.path.join(tmp_dir, source_image_name + '.tar')),
+            shlex.quote(os.path.join(tmp_dir, source_image_name)),
+            shlex.quote(tmp_dir),
+        ), ssh_client=source_ssh_client)
+
+        exec_command('rm -f %s && rmdir %s' % (
+            shlex.quote(shrinked_path),
+            shlex.quote(tmp_dir),
+        ), ssh_client=target_ssh_client, print_stdout=True, print_stderr=True)
+
+def str2bool(v):
+    if isinstance(v, bool):
+       return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Transport docker image with best effort to reduce transmission size')
     parser.add_argument('source_image', help='Source image in format: [user@host[:port]/]image:tag')
@@ -232,6 +255,7 @@ if __name__ == '__main__':
     parser.add_argument('--loglevel', help='Specify log level', required=False, default=logging.INFO)
     parser.add_argument('--target-docker-path', help='Specify target docker binary path', required=False, default='docker')
     parser.add_argument('--source-docker-path', help='Specify source docker binary path', required=False, default='docker')
+    parser.add_argument('--no-cleanup', help='do not cleanup tmp directory after using', type=str2bool, nargs='?', const=True, required=False, default=False)
 
     args = parser.parse_args()
 
