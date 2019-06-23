@@ -212,9 +212,9 @@ def main(args):
         print('\rtransfered %d/%d, percent = %.2f%%' % (transfered, size, transfered*100.0/size), end='', file=sys.stderr)
 
     if transfered == size:
-        print('transfer complete, transfered = %d, size = %d' % (transfered, size), file=sys.stderr)
+        print('\ntransfer complete, transfered = %d, size = %d' % (transfered, size), file=sys.stderr)
     else:
-        print('[ WARN ] transfer size mismatch, transfered = %d, size = %d' % (transfered, size), file=sys.stderr)
+        print('\n[ WARN ] transfer size mismatch, transfered = %d, size = %d' % (transfered, size), file=sys.stderr)
 
     reader.close()
     writer.close()
