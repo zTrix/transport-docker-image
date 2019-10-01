@@ -10,6 +10,7 @@ import argparse
 import getpass
 import shlex
 import subprocess
+import time
 from urllib.parse import urlparse
 
 import paramiko
@@ -52,6 +53,14 @@ def rand_str(n=8, charset=None):
     if charset is None:
         charset = string.printable[:62]
     return ''.join([random.choice(charset) for _ in range(n)])
+
+def readable_size(num, use_kibibyte=True, unit_ljust=0):
+    base, suffix = [(1000.,'B'),(1024.,'iB')][use_kibibyte]
+    for x in ['B'] + [x+suffix for x in 'kMGTP']:
+        if -base < num < base:
+            return "%3.1f %s" % (num, x.ljust(unit_ljust, ' '))
+        num /= base
+    return "%3.1f %s" % (num, x.ljust(unit_ljust, ' '))
 
 def parse_image_name(name):
     if '@' in name:
@@ -205,6 +214,7 @@ def main(args):
     writer = open_file(shrinked_path, mode='wb', ssh_client=target_ssh_client)
 
     transfered = 0
+    transfer_begin_time = time.time()
     print('transfer started...', file=sys.stderr)
     while True:
         content = reader.read(64 * 1024)
@@ -212,7 +222,9 @@ def main(args):
             break
         writer.write(content)
         transfered += len(content)
-        print('\rtransfered %d/%d, percent = %.2f%%' % (transfered, size, transfered*100.0/size), end='', file=sys.stderr)
+        elapsed = time.time() - transfer_begin_time
+        speed = transfered / elapsed if elapsed > 0 else 0
+        print('\rtransfered %d/%d, percent = %.2f%%, speed = %s/s' % (transfered, size, transfered*100.0/size, readable_size(speed)), end='', file=sys.stderr)
 
     if transfered == size:
         print('\ntransfer complete, transfered = %d, size = %d' % (transfered, size), file=sys.stderr)
