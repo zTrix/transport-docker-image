@@ -158,6 +158,9 @@ def main(args):
     if source_ssh_client is None and target_ssh_client is None:
         raise Exception('at least one end should be using ssh')
 
+    if args.pre_hook:
+        exec_command(args.pre_hook, ssh_client=target_ssh_client, print_stdout=True, print_stderr=True)
+
     exec_command('mkdir -p %s' % shlex.quote(os.path.join(tmp_dir, source_image_name)), ssh_client=source_ssh_client)
     exec_command('%s save -o %s %s' % (
         args.source_docker_path,
@@ -237,6 +240,9 @@ def main(args):
             shlex.quote(tmp_dir),
         ), ssh_client=target_ssh_client, print_stdout=True, print_stderr=True)
 
+    if args.post_hook:
+        exec_command(args.post_hook, ssh_client=target_ssh_client, print_stdout=True, print_stderr=True)
+
 def str2bool(v):
     if isinstance(v, bool):
        return v
@@ -256,6 +262,8 @@ if __name__ == '__main__':
     parser.add_argument('--target-docker-path', help='Specify target docker binary path', required=False, default='docker')
     parser.add_argument('--source-docker-path', help='Specify source docker binary path', required=False, default='docker')
     parser.add_argument('--no-cleanup', help='do not cleanup tmp directory after using', type=str2bool, nargs='?', const=True, required=False, default=False)
+    parser.add_argument('--pre-hook', help='pre cmd hook before transport starts', type=str, default=None)
+    parser.add_argument('--post-hook', help='post cmd hook after transport ended', type=str, default=None)
 
     args = parser.parse_args()
 
