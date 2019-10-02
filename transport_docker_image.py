@@ -224,7 +224,7 @@ def main(args):
         transfered += len(content)
         elapsed = time.time() - transfer_begin_time
         speed = transfered / elapsed if elapsed > 0 else 0
-        print('\rtransfered %d/%d, percent = %.2f%%, speed = %s/s' % (transfered, size, transfered*100.0/size, readable_size(speed)), end='', file=sys.stderr)
+        print('\rtransfered %d/%d, percent = %.2f%%, speed = %s/s    ' % (transfered, size, transfered*100.0/size, readable_size(speed)), end='', file=sys.stderr)
 
     if transfered == size:
         print('\ntransfer complete, transfered = %d, size = %d' % (transfered, size), file=sys.stderr)
