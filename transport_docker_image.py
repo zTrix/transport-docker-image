@@ -207,7 +207,7 @@ def main(args):
         shlex.quote(os.path.join(tmp_dir, source_image_name))
     ), ssh_client=source_ssh_client, print_stderr=True)
 
-    exec_command('mkdir -p %s' % shlex.quote(tmp_dir), ssh_client=target_ssh_client)
+    exec_command('mkdir -p %s' % shlex.quote(os.path.join(tmp_dir, source_image_name)), ssh_client=target_ssh_client)
 
     size = file_size(shrinked_path, ssh_client=source_ssh_client)
     reader = open_file(shrinked_path, mode='rb', ssh_client=source_ssh_client)
@@ -247,8 +247,7 @@ def main(args):
             shlex.quote(tmp_dir),
         ), ssh_client=source_ssh_client)
 
-        exec_command('rm -f %s && rmdir %s' % (
-            shlex.quote(shrinked_path),
+        exec_command('rm -rf %s' % (
             shlex.quote(tmp_dir),
         ), ssh_client=target_ssh_client, print_stdout=True, print_stderr=True)
 
