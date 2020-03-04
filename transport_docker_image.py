@@ -119,7 +119,7 @@ def write_file(path, content:bytes, ssh_client:paramiko.SSHClient=None):
             f.write(content)
 
 def exec_command(command:str, ssh_client:paramiko.SSHClient=None, print_stdout=False, print_stderr=False):
-    logger.info('[ %sSTEP ] %s' % ('REMOTE ' if ssh_client is not None else 'LOCAL ', command))
+    logger.info('[ %sSTEP ] %s' % ('REMOTE ' if ssh_client is not None else 'LOCAL  ', command))
     if ssh_client is not None:
         stdin_io, stdout_io, stderr_io = ssh_client.exec_command(command)
         stdout = stdout_io.read()
@@ -136,14 +136,14 @@ def exec_command(command:str, ssh_client:paramiko.SSHClient=None, print_stdout=F
                 print(stderr, file=sys.stderr)
         return stdout, stderr
     else:
-        cmd = shlex.split(command)
         kwargs = {
-            # NOTE: use consistent return type(bytes) for exec_command
+            'stdout': subprocess.PIPE,
+            'stderr': subprocess.PIPE,
+            'shell': True,  # for pipe operator
+            # NOTE: use consistent return type(bytes) for exec_command, so do not use utf-8 here
             # 'encoding': 'utf-8',
         }
-        if print_stderr:
-            kwargs['stderr'] = subprocess.PIPE
-        proc = subprocess.run(cmd, **kwargs)
+        proc = subprocess.run(command, **kwargs)
         if print_stdout:
             try:
                 print(proc.stdout.decode(), file=sys.stderr)
