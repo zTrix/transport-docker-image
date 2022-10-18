@@ -11,7 +11,7 @@ import getpass
 import shlex
 import subprocess
 import time
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote_plus
 
 import paramiko
 
@@ -165,50 +165,52 @@ def main(args):
     source_ssh_client, source_image_name = parse_image_name(args.source_image)
     target_ssh_client, target_image_name = parse_image_name(args.target_image)
 
+    quoted_source_image_name = quote_plus(source_image_name)
+
     if source_ssh_client is None and target_ssh_client is None:
         raise Exception('at least one end should be using ssh')
 
     if args.pre_hook:
         exec_command(args.pre_hook, ssh_client=target_ssh_client, print_stdout=True, print_stderr=True)
 
-    exec_command('mkdir -p %s' % shlex.quote(os.path.join(tmp_dir, source_image_name)), ssh_client=source_ssh_client)
+    exec_command('mkdir -p %s' % shlex.quote(os.path.join(tmp_dir, quoted_source_image_name)), ssh_client=source_ssh_client)
     exec_command('%s save -o %s %s' % (
         args.source_docker_path,
-        shlex.quote(os.path.join(tmp_dir, source_image_name + '.tar')),
+        shlex.quote(os.path.join(tmp_dir, quoted_source_image_name + '.tar')),
         shlex.quote(source_image_name),
     ), ssh_client=source_ssh_client)
     exec_command('tar -x -f %s -C %s' % (
-        shlex.quote(os.path.join(tmp_dir, source_image_name + '.tar')),
-        shlex.quote(os.path.join(tmp_dir, source_image_name)),
+        shlex.quote(os.path.join(tmp_dir, quoted_source_image_name + '.tar')),
+        shlex.quote(os.path.join(tmp_dir, quoted_source_image_name)),
     ), ssh_client=source_ssh_client)
 
     stdout, stderr = exec_command('%s inspect %s --format "{{json .RootFS.Layers}}"' % (args.target_docker_path, shlex.quote(target_image_name)), ssh_client=target_ssh_client, print_stderr=True)
 
-    if (not stdout or not stdout.strip()) and b'Error: No such object:' in stderr:
+    if (not stdout or not stdout.strip()) and b'no such object:' in stderr.lower():
         logger.info('target image not found at destination, could not shrink size')
     else:
         existing_layers = json.loads(stdout)
         assert isinstance(existing_layers, list)
 
         clean_file = string.Template(clean_template).substitute(existing_layers=json.dumps(existing_layers), image_name=target_image_name)
-        write_file(os.path.join(tmp_dir, source_image_name, 'clean.py'), clean_file.encode(), ssh_client=source_ssh_client)
+        write_file(os.path.join(tmp_dir, quoted_source_image_name, 'clean.py'), clean_file.encode(), ssh_client=source_ssh_client)
 
         exec_command('python %s' % (
-            shlex.quote(os.path.join(tmp_dir, source_image_name, 'clean.py'))
+            shlex.quote(os.path.join(tmp_dir, quoted_source_image_name, 'clean.py'))
         ), ssh_client=source_ssh_client, print_stderr=True)
 
         exec_command('rm -f %s' % (
-            shlex.quote(os.path.join(tmp_dir, source_image_name, 'clean.py'))
+            shlex.quote(os.path.join(tmp_dir, quoted_source_image_name, 'clean.py'))
         ), ssh_client=source_ssh_client, print_stderr=True)
 
-    shrinked_path = os.path.join(tmp_dir, source_image_name + '.shrinked.tar.gz')
+    shrinked_path = os.path.join(tmp_dir, quoted_source_image_name + '.shrinked.tar.gz')
 
     exec_command('tar -c -z -f %s -C %s .' % (
         shlex.quote(shrinked_path),
-        shlex.quote(os.path.join(tmp_dir, source_image_name))
+        shlex.quote(os.path.join(tmp_dir, quoted_source_image_name))
     ), ssh_client=source_ssh_client, print_stderr=True)
 
-    exec_command('mkdir -p %s' % shlex.quote(os.path.join(tmp_dir, source_image_name)), ssh_client=target_ssh_client)
+    exec_command('mkdir -p %s' % shlex.quote(os.path.join(tmp_dir, quoted_source_image_name)), ssh_client=target_ssh_client)
 
     size = file_size(shrinked_path, ssh_client=source_ssh_client)
     reader = open_file(shrinked_path, mode='rb', ssh_client=source_ssh_client)
@@ -216,9 +218,10 @@ def main(args):
 
     transfered = 0
     transfer_begin_time = time.time()
+    chunk_size = args.chunk_size * 1024
     print('transfer started...', file=sys.stderr)
     while True:
-        content = reader.read(64 * 1024)
+        content = reader.read(chunk_size)
         if not content:
             break
         writer.write(content)
@@ -243,8 +246,8 @@ def main(args):
     if not args.no_cleanup:
         exec_command('rm -f %s %s && rm -rf %s && rmdir %s' % (
             shlex.quote(shrinked_path),
-            shlex.quote(os.path.join(tmp_dir, source_image_name + '.tar')),
-            shlex.quote(os.path.join(tmp_dir, source_image_name)),
+            shlex.quote(os.path.join(tmp_dir, quoted_source_image_name + '.tar')),
+            shlex.quote(os.path.join(tmp_dir, quoted_source_image_name)),
             shlex.quote(tmp_dir),
         ), ssh_client=source_ssh_client)
 
@@ -276,6 +279,7 @@ if __name__ == '__main__':
     parser.add_argument('--no-cleanup', help='do not cleanup tmp directory after using', type=str2bool, nargs='?', const=True, required=False, default=False)
     parser.add_argument('--pre-hook', help='pre cmd hook before transport starts', type=str, default=None)
     parser.add_argument('--post-hook', help='post cmd hook after transport ended', type=str, default=None)
+    parser.add_argument('--chunk-size', help='specify transfer chunk size in KiB', type=int, required=False, default=64)
 
     args = parser.parse_args()
 
