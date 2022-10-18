@@ -118,6 +118,15 @@ def write_file(path, content:bytes, ssh_client:paramiko.SSHClient=None):
         with open(path, 'wb') as f:
             f.write(content)
 
+def list_dir(path:str, ssh_client:paramiko.SSHClient=None):
+    if ssh_client is not None:
+        sftp_client = ssh_client.open_sftp()
+        ret = sftp_client.listdir(path)
+        sftp_client.close()
+        return ret
+    else:
+        return os.listdir(path)
+
 def exec_command(command:str, ssh_client:paramiko.SSHClient=None, print_stdout=False, print_stderr=False):
     logger.info('[ %sSTEP ] %s' % ('REMOTE ' if ssh_client is not None else 'LOCAL  ', command))
     if ssh_client is not None:
@@ -174,11 +183,15 @@ def main(args):
         exec_command(args.pre_hook, ssh_client=target_ssh_client, print_stdout=True, print_stderr=True)
 
     exec_command('mkdir -p %s' % shlex.quote(os.path.join(tmp_dir, quoted_source_image_name)), ssh_client=source_ssh_client)
-    exec_command('%s save -o %s %s' % (
+
+    stdout, stderr = exec_command('%s save -o %s %s' % (
         args.source_docker_path,
         shlex.quote(os.path.join(tmp_dir, quoted_source_image_name + '.tar')),
         shlex.quote(source_image_name),
-    ), ssh_client=source_ssh_client)
+    ), ssh_client=source_ssh_client, print_stderr=True, print_stdout=True)
+    if stderr and b'error' in stderr.lower():
+        raise Exception('failed to save image')
+
     exec_command('tar -x -f %s -C %s' % (
         shlex.quote(os.path.join(tmp_dir, quoted_source_image_name + '.tar')),
         shlex.quote(os.path.join(tmp_dir, quoted_source_image_name)),
@@ -205,7 +218,11 @@ def main(args):
 
     shrinked_path = os.path.join(tmp_dir, quoted_source_image_name + '.shrinked.tar.gz')
 
-    exec_command('tar -c -z -f %s -C %s .' % (
+    if not list_dir(os.path.join(tmp_dir, quoted_source_image_name), ssh_client=source_ssh_client):
+        raise Exception('directory is empty')
+
+    exec_command('tar -c %s -f %s -C %s .' % (
+        '' if 'podman' in args.source_docker_path else '-z',
         shlex.quote(shrinked_path),
         shlex.quote(os.path.join(tmp_dir, quoted_source_image_name))
     ), ssh_client=source_ssh_client, print_stderr=True)
