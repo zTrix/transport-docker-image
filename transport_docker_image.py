@@ -45,8 +45,12 @@ for item in manifest:
         for i, e in enumerate(config['rootfs']['diff_ids']):
             if e in existing_layers:
                 layer = layers[i]
-                print('removing ' + os.path.dirname(layer), file=sys.stderr)
-                shutil.rmtree(os.path.dirname(layer), ignore_errors=True)
+                if os.path.isfile(layer):
+                    print('removing ' + layer, file=sys.stderr)
+                    os.unlink(layer)
+                else:
+                    print('removing ' + os.path.dirname(layer), file=sys.stderr)
+                    shutil.rmtree(os.path.dirname(layer), ignore_errors=True)
 """
 
 def rand_str(n=8, charset=None):
@@ -212,9 +216,10 @@ def main(args):
             shlex.quote(os.path.join(tmp_dir, quoted_source_image_name, 'clean.py'))
         ), ssh_client=source_ssh_client, print_stderr=True)
 
-        exec_command('rm -f %s' % (
-            shlex.quote(os.path.join(tmp_dir, quoted_source_image_name, 'clean.py'))
-        ), ssh_client=source_ssh_client, print_stderr=True)
+        if not args.no_cleanup:
+            exec_command('rm -f %s' % (
+                shlex.quote(os.path.join(tmp_dir, quoted_source_image_name, 'clean.py'))
+            ), ssh_client=source_ssh_client, print_stderr=True)
 
     shrinked_path = os.path.join(tmp_dir, quoted_source_image_name + '.shrinked.tar.gz')
 
