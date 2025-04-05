@@ -11,7 +11,7 @@ import getpass
 import shlex
 import subprocess
 import time
-from urllib.parse import urlparse, quote_plus
+from urllib.parse import urlparse, parse_qs, quote_plus
 
 import paramiko
 
@@ -82,9 +82,31 @@ def parse_image_name(name):
         if parsed.password:
             ssh_option['password'] = parsed.password
 
-        image_with_tag = parsed.path[1:]
+        image_with_tag = parsed.path.lstrip('/')
         if not image_with_tag:
             raise Exception('invalid image name')
+
+        if parsed.query:
+            mapping = parse_qs(parsed.query)
+
+            if mapping.get('proxy'):
+                proxy_host = mapping.get('proxy')[0]
+                proxy_user = 'root'
+                if '@' in proxy_host:
+                    ary = proxy_host.split('@', maxsplit=1)
+                    proxy_user = ary[0]
+                    proxy_host = ary[1]
+
+                jumpbox = paramiko.SSHClient()
+                jumpbox.set_missing_host_key_policy(paramiko.WarningPolicy())
+                jumpbox.connect(proxy_host, username=proxy_user)
+
+                jumpbox_transport = jumpbox.get_transport()
+                src_addr = ('0.0.0.0', 0)
+                dest_addr = (ssh_option['host'], ssh_option['port'])
+                jumpbox_channel = jumpbox_transport.open_channel("direct-tcpip", dest_addr, src_addr)
+
+                ssh_option['sock'] = jumpbox_channel
 
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.WarningPolicy())
