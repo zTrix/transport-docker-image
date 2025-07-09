@@ -223,11 +223,13 @@ def list_existing_diffid(target_docker_path:str, target_ssh_client:Optional[para
         driver = info_obj.get("Driver")
         if driver == "overlay2":
             diffid_dir = os.path.join(docker_root_dir, "image", "overlay2", "layerdb", "sha256")
-            layers = list_dir(diffid_dir, ssh_client=target_ssh_client)
-            if layers:
-                path_list = [os.path.join(diffid_dir, layer, 'diff') for layer in layers]
-                logger.info("retrieve existing layers from target layerdb: %s layers found" % len(layers))
-                return read_files(path_list, ssh_client=target_ssh_client, transform=lambda x: x.decode("utf-8"))
+            stdout, stderr = exec_command('find %s -type f -name diff -exec cat {} \\; -exec echo \\;' % diffid_dir, ssh_client=target_ssh_client)
+            ret = []
+            for line in stdout.splitlines():
+                line = line.strip().decode('utf-8')
+                if line.startswith("sha256:"):
+                    ret.append(line)
+            return ret
         else:
             logger.info("driver is not overlay2, fallback to inspect target image diff id")
     except Exception:
