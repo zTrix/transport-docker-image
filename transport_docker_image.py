@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-
+from typing import List, Dict, Any, Optional
 import os
 import sys
 import json
@@ -66,9 +66,11 @@ def readable_size(num, use_kibibyte=True, unit_ljust=0):
         num /= base
     return "%3.1f %s" % (num, x.ljust(unit_ljust, ' '))
 
-def parse_image_name(name):
-    if '@' in name:
-        parsed = urlparse('ssh://' + name)
+def parse_image_name(name:str):
+    if '@' in name or "ssh://" in name:
+        if not name.startswith("ssh://"):
+            name = 'ssh://' + name
+        parsed = urlparse(name)
 
         ssh_option = {}
 
@@ -144,6 +146,25 @@ def write_file(path, content:bytes, ssh_client:paramiko.SSHClient=None):
         with open(path, 'wb') as f:
             f.write(content)
 
+def read_files(path_list:List[str], ssh_client:Optional[paramiko.SSHClient]=None, mode='r', transform:Optional[callable]=None):
+    ret = []
+    if ssh_client is not None:
+        sftp_client = ssh_client.open_sftp()
+        for path in path_list:
+            with sftp_client.open(path, mode) as f:
+                s = f.read()
+                if transform is not None: s = transform(s)
+                ret.append(s)
+        sftp_client.close()
+    else:
+        for path in path_list:
+            with open(path, mode) as f:
+                s = f.read()
+                if transform is not None: s = transform(s)
+                ret.append(s)
+    return ret
+
+
 def list_dir(path:str, ssh_client:paramiko.SSHClient=None):
     if ssh_client is not None:
         sftp_client = ssh_client.open_sftp()
@@ -177,6 +198,7 @@ def exec_command(command:str, ssh_client:paramiko.SSHClient=None, print_stdout=F
             'shell': True,  # for pipe operator
             # NOTE: use consistent return type(bytes) for exec_command, so do not use utf-8 here
             # 'encoding': 'utf-8',
+            'check': True,
         }
         proc = subprocess.run(command, **kwargs)
         if print_stdout:
@@ -190,6 +212,36 @@ def exec_command(command:str, ssh_client:paramiko.SSHClient=None, print_stdout=F
             except:
                 print(proc.stderr, file=sys.stderr)
         return proc.stdout, proc.stderr
+    
+def list_existing_diffid(target_docker_path:str, target_ssh_client:Optional[paramiko.SSHClient], target_image_name:str) -> List[str] | None:
+    # METHOD 1: try list all existing diffid in /var/lib/docker/image/overlay2/layerdb/sha256
+    try:
+        stderr = ""
+        stdout, stderr = exec_command('%s info --format "{{json .}}"' % (target_docker_path, ), ssh_client=target_ssh_client, print_stderr=True)
+        info_obj:Dict[str, Any] = json.loads(stdout)
+        docker_root_dir = info_obj.get("DockerRootDir")
+        driver = info_obj.get("Driver")
+        if driver == "overlay2":
+            diffid_dir = os.path.join(docker_root_dir, "image", "overlay2", "layerdb", "sha256")
+            layers = list_dir(diffid_dir, ssh_client=target_ssh_client)
+            if layers:
+                path_list = [os.path.join(diffid_dir, layer, 'diff') for layer in layers]
+                logger.info("retrieve existing layers from target layerdb: %s layers found" % len(layers))
+                return read_files(path_list, ssh_client=target_ssh_client, transform=lambda x: x.decode("utf-8"))
+        else:
+            logger.info("driver is not overlay2, fallback to inspect target image diff id")
+    except Exception:
+        logger.exception("could not get docker info, stderr = %r" % stderr)
+
+    stdout, stderr = exec_command('%s inspect %s --format "{{json .RootFS.Layers}}"' % (target_docker_path, shlex.quote(target_image_name)), ssh_client=target_ssh_client, print_stderr=True)
+
+    if (not stdout or not stdout.strip()) and b'no such object:' in stderr.lower():
+        logger.error('target image not found at destination, could not shrink size')
+        return None
+    else:
+        existing_layers = json.loads(stdout)
+        assert isinstance(existing_layers, list)
+        return existing_layers
 
 def main(args):
     if args.workdir:
@@ -223,14 +275,9 @@ def main(args):
         shlex.quote(os.path.join(tmp_dir, quoted_source_image_name)),
     ), ssh_client=source_ssh_client)
 
-    stdout, stderr = exec_command('%s inspect %s --format "{{json .RootFS.Layers}}"' % (args.target_docker_path, shlex.quote(target_image_name)), ssh_client=target_ssh_client, print_stderr=True)
+    existing_layers = list_existing_diffid(args.target_docker_path, target_ssh_client=target_ssh_client, target_image_name=target_image_name)
 
-    if (not stdout or not stdout.strip()) and b'no such object:' in stderr.lower():
-        logger.info('target image not found at destination, could not shrink size')
-    else:
-        existing_layers = json.loads(stdout)
-        assert isinstance(existing_layers, list)
-
+    if existing_layers:
         clean_file = string.Template(clean_template).substitute(existing_layers=json.dumps(existing_layers), image_name=target_image_name)
         write_file(os.path.join(tmp_dir, quoted_source_image_name, 'clean.py'), clean_file.encode(), ssh_client=source_ssh_client)
 
@@ -312,7 +359,7 @@ def str2bool(v):
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
-if __name__ == '__main__':
+def cli():
     parser = argparse.ArgumentParser(description='Transport docker image with best effort to reduce transmission size')
     parser.add_argument('source_image', help='Source image in format: [user@host[:port]/]image:tag')
     parser.add_argument('target_image', help='Target image in format: [user@host[:port]/]image:tag')
@@ -329,3 +376,6 @@ if __name__ == '__main__':
 
     logging.basicConfig(level=args.loglevel)
     main(args)
+
+if __name__ == '__main__':
+    cli()
