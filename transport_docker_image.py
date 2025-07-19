@@ -17,42 +17,6 @@ import paramiko
 
 logger = logging.getLogger('TransDockerImage')
 
-clean_template = """
-#!/usr/bin/env python
-
-import os
-import sys
-import shutil
-import json
-
-os.chdir(os.path.dirname(os.path.realpath(__file__)))
-
-image_name = '''
-$image_name
-'''.strip()
-
-existing_layers = $existing_layers
-
-with open('manifest.json') as f:
-    manifest = json.loads(f.read())
-
-for item in manifest:
-    if image_name in item['RepoTags']:
-        layers = item['Layers']
-        with open(item['Config']) as f:
-            config = json.loads(f.read())
-        
-        for i, e in enumerate(config['rootfs']['diff_ids']):
-            if e in existing_layers:
-                layer = layers[i]
-                if os.path.isfile(layer):
-                    print('removing ' + layer, file=sys.stderr)
-                    os.unlink(layer)
-                else:
-                    print('removing ' + os.path.dirname(layer), file=sys.stderr)
-                    shutil.rmtree(os.path.dirname(layer), ignore_errors=True)
-"""
-
 def rand_str(n=8, charset=None):
     if charset is None:
         charset = string.printable[:62]
@@ -285,11 +249,9 @@ def main(args):
     existing_layers = list_existing_diffid(args.target_docker_path, target_ssh_client=target_ssh_client, target_image_name=target_image_name)
 
     if existing_layers:
-        clean_file = string.Template(clean_template).substitute(existing_layers=json.dumps(existing_layers), image_name=target_image_name)
-        write_file(os.path.join(tmp_dir, quoted_source_image_name, 'clean.py'), clean_file.encode(), ssh_client=source_ssh_client)
-
-        exec_command('python %s' % (
-            shlex.quote(os.path.join(tmp_dir, quoted_source_image_name, 'clean.py'))
+        exec_command('pushd %s && rm -rf ./blobs/{%s}' % (
+            shlex.quote(os.path.join(tmp_dir, quoted_source_image_name)),
+            ','.join(x.replace("sha256:", "sha256/") for x in existing_layers),
         ), ssh_client=source_ssh_client, print_stderr=True)
 
         if not args.no_cleanup:
@@ -356,7 +318,7 @@ def main(args):
     if args.post_hook:
         exec_command(args.post_hook, ssh_client=target_ssh_client, print_stdout=True, print_stderr=True)
 
-def str2bool(v):
+def str2bool(v) -> bool:
     if isinstance(v, bool):
        return v
     if v.lower() in ('yes', 'true', 't', 'y', '1'):
