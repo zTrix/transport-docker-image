@@ -103,6 +103,23 @@ def open_file(path, ssh_client:Optional[paramiko.SSHClient]=None, mode='rb'):
         sftp_client = ssh_client.open_sftp()
         return sftp_client.open(path, mode)
 
+def read_file(path, ssh_client:Optional[paramiko.SSHClient]=None) -> Optional[bytes]:
+    logger.info('[ STEP ] read file %s' % (path, ))
+    try:
+        if ssh_client is not None:
+            sftp_client = ssh_client.open_sftp()
+            with sftp_client.open(path, 'rb') as f:
+                content = f.read()
+            sftp_client.close()
+            return content
+        else:
+            with open(path, 'rb') as f:
+                content = f.read()
+            return content
+    except Exception as ex:
+        logger.exception('failed to read file %s: %s' % (path, ex))
+        return None
+
 def write_file(path, content:bytes, ssh_client:Optional[paramiko.SSHClient]=None):
     logger.info('[ STEP ] write file to %s, length = %d' % (path, len(content)))
     if ssh_client is not None:
@@ -249,14 +266,25 @@ def main(args):
     existing_layers = list_existing_diffid(args.target_docker_path, target_ssh_client=target_ssh_client, target_image_name=target_image_name)
 
     if existing_layers:
-        exec_command('pushd %s && rm -rf ./blobs/{%s}' % (
-            shlex.quote(os.path.join(tmp_dir, quoted_source_image_name)),
-            ','.join(x.replace("sha256:", "sha256/") for x in existing_layers),
-        ), ssh_client=source_ssh_client, print_stderr=True)
+        manifest_content = read_file(os.path.join(tmp_dir, quoted_source_image_name, "manifest.json"))
+        layers_to_remove = []
+        if manifest_content:
+            manifest_obj:List[dict] = json.loads(manifest_content)
+            for item in manifest_obj:
+                layers = item.get("Layers")
+                assert isinstance(layers, list)
+                for layer in layers:
+                    layer_hash = layer.replace("blobs/sha256/", "sha256:")
+                    if layer_hash in existing_layers:
+                        logger.info("found redundant layer %s" % layer)
+                        layers_to_remove.append(layer)
+        else:
+            logger.warning("manifest.json read error, unable to shrink image size")
 
-        if not args.no_cleanup:
-            exec_command('rm -f %s' % (
-                shlex.quote(os.path.join(tmp_dir, quoted_source_image_name, 'clean.py'))
+        if layers_to_remove:
+            exec_command('pushd %s && rm -rf ./{%s}' % (
+                shlex.quote(os.path.join(tmp_dir, quoted_source_image_name)),
+                ','.join(layers_to_remove),
             ), ssh_client=source_ssh_client, print_stderr=True)
 
     shrinked_path = os.path.join(tmp_dir, quoted_source_image_name + '.shrinked.tar.gz')
