@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Callable, Tuple
 import os
 import sys
 import json
@@ -92,7 +92,9 @@ def parse_image_name(name:str):
             mapping = parse_qs(parsed.query)
 
             if mapping.get('proxy'):
-                proxy_host = mapping.get('proxy')[0]
+                proxy_list = mapping.get('proxy')
+                assert proxy_list is not None and len(proxy_list) > 0
+                proxy_host = proxy_list[0]
                 proxy_user = 'root'
                 if '@' in proxy_host:
                     ary = proxy_host.split('@', maxsplit=1)
@@ -104,11 +106,12 @@ def parse_image_name(name:str):
                 jumpbox.connect(proxy_host, username=proxy_user)
 
                 jumpbox_transport = jumpbox.get_transport()
-                src_addr = ('0.0.0.0', 0)
-                dest_addr = (ssh_option['host'], ssh_option['port'])
-                jumpbox_channel = jumpbox_transport.open_channel("direct-tcpip", dest_addr, src_addr)
+                if jumpbox_transport is not None:
+                    src_addr = ('0.0.0.0', 0)
+                    dest_addr = (ssh_option['host'], ssh_option['port'])
+                    jumpbox_channel = jumpbox_transport.open_channel("direct-tcpip", dest_addr, src_addr)
 
-                ssh_option['sock'] = jumpbox_channel
+                    ssh_option['sock'] = jumpbox_channel
 
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.WarningPolicy())
@@ -119,23 +122,24 @@ def parse_image_name(name:str):
     else:
         return None, name
 
-def file_size(path, ssh_client:paramiko.SSHClient=None):
+def file_size(path, ssh_client:Optional[paramiko.SSHClient]=None) -> int:
     if ssh_client is None:
         return os.stat(path).st_size
     else:
         sftp_client = ssh_client.open_sftp()
         stat = sftp_client.stat(path)
         sftp_client.close()
+        assert stat.st_size is not None
         return stat.st_size
 
-def open_file(path, ssh_client:paramiko.SSHClient=None, mode='rb'):
+def open_file(path, ssh_client:Optional[paramiko.SSHClient]=None, mode='rb'):
     if ssh_client is None:
         return open(path, mode)
     else:
         sftp_client = ssh_client.open_sftp()
         return sftp_client.open(path, mode)
 
-def write_file(path, content:bytes, ssh_client:paramiko.SSHClient=None):
+def write_file(path, content:bytes, ssh_client:Optional[paramiko.SSHClient]=None):
     logger.info('[ STEP ] write file to %s, length = %d' % (path, len(content)))
     if ssh_client is not None:
         sftp_client = ssh_client.open_sftp()
@@ -146,7 +150,7 @@ def write_file(path, content:bytes, ssh_client:paramiko.SSHClient=None):
         with open(path, 'wb') as f:
             f.write(content)
 
-def read_files(path_list:List[str], ssh_client:Optional[paramiko.SSHClient]=None, mode='r', transform:Optional[callable]=None):
+def read_files(path_list:List[str], ssh_client:Optional[paramiko.SSHClient]=None, mode='r', transform:Optional[Callable]=None):
     ret = []
     if ssh_client is not None:
         sftp_client = ssh_client.open_sftp()
@@ -165,7 +169,7 @@ def read_files(path_list:List[str], ssh_client:Optional[paramiko.SSHClient]=None
     return ret
 
 
-def list_dir(path:str, ssh_client:paramiko.SSHClient=None):
+def list_dir(path:str, ssh_client:Optional[paramiko.SSHClient]=None) -> List[str]:
     if ssh_client is not None:
         sftp_client = ssh_client.open_sftp()
         ret = sftp_client.listdir(path)
@@ -174,7 +178,7 @@ def list_dir(path:str, ssh_client:paramiko.SSHClient=None):
     else:
         return os.listdir(path)
 
-def exec_command(command:str, ssh_client:paramiko.SSHClient=None, print_stdout=False, print_stderr=False):
+def exec_command(command:str, ssh_client:Optional[paramiko.SSHClient]=None, print_stdout=False, print_stderr=False) -> Tuple[bytes, bytes]:
     logger.info('[ %sSTEP ] %s' % ('REMOTE ' if ssh_client is not None else 'LOCAL  ', command))
     if ssh_client is not None:
         stdin_io, stdout_io, stderr_io = ssh_client.exec_command(command)
@@ -220,6 +224,7 @@ def list_existing_diffid(target_docker_path:str, target_ssh_client:Optional[para
         stdout, stderr = exec_command('%s info --format "{{json .}}"' % (target_docker_path, ), ssh_client=target_ssh_client, print_stderr=True)
         info_obj:Dict[str, Any] = json.loads(stdout)
         docker_root_dir = info_obj.get("DockerRootDir")
+        assert docker_root_dir is not None
         driver = info_obj.get("Driver")
         if driver == "overlay2":
             diffid_dir = os.path.join(docker_root_dir, "image", "overlay2", "layerdb", "sha256")
