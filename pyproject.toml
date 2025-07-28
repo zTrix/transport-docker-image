@@ -1,6 +1,6 @@
 [project]
 name = "transport-docker-image"
-version = "0.3.0"
+version = "0.3.1"
 readme = "README.md"
 description = "transport docker image with best effort to reduce transmission size"
 requires-python = ">=3.11"

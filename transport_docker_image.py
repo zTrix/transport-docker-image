@@ -356,10 +356,19 @@ def str2bool(v) -> bool:
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
+def version(short=False):
+    version = "v0.3.1"
+    if short:
+        print(version, file=sys.stderr)
+    else:
+        print("transport-docker-image version %s" % version, file=sys.stderr)
+
 def cli():
     parser = argparse.ArgumentParser(description='Transport docker image with best effort to reduce transmission size')
-    parser.add_argument('source_image', help='Source image in format: [user@host[:port]/]image:tag')
-    parser.add_argument('target_image', help='Target image in format: [user@host[:port]/]image:tag')
+
+    parser.add_argument("-v", "--version", action="store_true", help="Show the qemu-compose version information")
+    parser.add_argument('source_image', help='Source image in format: [user@host[:port]/]image:tag', nargs='?')
+    parser.add_argument('target_image', help='Target image in format: [user@host[:port]/]image:tag', nargs='?')
     parser.add_argument('--workdir', help='Specify workdir for tempfile, defaults to random dir under /tmp', required=False)
     parser.add_argument('--loglevel', help='Specify log level', required=False, default=logging.INFO)
     parser.add_argument('--target-docker-path', help='Specify target docker binary path', required=False, default='docker')
@@ -370,6 +379,14 @@ def cli():
     parser.add_argument('--chunk-size', help='specify transfer chunk size in KiB', type=int, required=False, default=64)
 
     args = parser.parse_args()
+
+    if args.version:
+        version()
+        sys.exit(0)
+
+    if not args.source_image or not args.target_image:
+        parser.print_help()
+        sys.exit(1)
 
     logging.basicConfig(level=args.loglevel)
     main(args)
