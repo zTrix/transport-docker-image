@@ -266,7 +266,7 @@ def main(args):
     existing_layers = list_existing_diffid(args.target_docker_path, target_ssh_client=target_ssh_client, target_image_name=target_image_name)
 
     if existing_layers:
-        manifest_content = read_file(os.path.join(tmp_dir, quoted_source_image_name, "manifest.json"), ssh_client=souce_ssh_client)
+        manifest_content = read_file(os.path.join(tmp_dir, quoted_source_image_name, "manifest.json"), ssh_client=source_ssh_client)
         layers_to_remove = []
         if manifest_content:
             manifest_obj:List[dict] = json.loads(manifest_content)
