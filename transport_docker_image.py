@@ -282,9 +282,9 @@ def main(args):
             logger.warning("manifest.json read error, unable to shrink image size")
 
         if layers_to_remove:
-            exec_command('pushd %s && rm -rf ./{%s}' % (
+            exec_command('cd %s && rm -rf %s' % (
                 shlex.quote(os.path.join(tmp_dir, quoted_source_image_name)),
-                ','.join(layers_to_remove),
+                ' '.join(['./' + shlex.quote(x) for x in layers_to_remove]),
             ), ssh_client=source_ssh_client, print_stderr=True)
 
     shrinked_path = os.path.join(tmp_dir, quoted_source_image_name + '.shrinked.tar.gz')
