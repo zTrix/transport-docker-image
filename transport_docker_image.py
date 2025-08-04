@@ -275,7 +275,8 @@ def main(args):
                 assert isinstance(layers, list)
                 for layer in layers:
                     layer_hash = layer.replace("blobs/sha256/", "sha256:")
-                    if layer_hash in existing_layers:
+                    # empty layer, size = 0
+                    if layer_hash in existing_layers and layer_hash != "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef":
                         logger.info("found redundant layer %s" % layer)
                         layers_to_remove.append(layer)
         else:
@@ -357,7 +358,7 @@ def str2bool(v) -> bool:
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
 def version(short=False):
-    version = "v0.3.2"
+    version = "v0.3.3"
     if short:
         print(version, file=sys.stderr)
     else:
